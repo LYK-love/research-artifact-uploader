@@ -11,7 +11,7 @@ rau
 ```bash
 rau check --manifest <file>
 rau pack --manifest <file>
-rau upload --manifest <file> [--dry-run|--no-upload|--no-record|--allow-outside-project]
+rau upload --manifest <file> [--dry-run|--no-upload|--no-record|--presign|--allow-outside-project]
 rau records [--jsonl <file>] [--markdown <file>] [--last <N>]
 ```
 
@@ -42,6 +42,7 @@ Full flow: collect -> pack -> metadata -> upload -> records.
 ```bash
 rau upload --manifest examples/artifacts.yaml --no-upload
 rau upload --manifest examples/artifacts.yaml
+rau upload --manifest examples/artifacts.yaml --presign
 ```
 
 ### `records`

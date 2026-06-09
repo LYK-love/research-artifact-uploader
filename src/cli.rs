@@ -8,7 +8,7 @@ use crate::{
     gitinfo::read_git_info,
     manifest::{parse_manifest, Manifest},
     metadata::{build_metadata, Metadata},
-    oss::{check_access, oss_uri, upload_file},
+    oss::{check_access, oss_uri, presign_uri, upload_file},
     records::{append_jsonl, append_markdown, read_records, RecordRow},
 };
 
@@ -44,6 +44,8 @@ enum Commands {
         no_record: bool,
         #[arg(long)]
         allow_outside_project: bool,
+        #[arg(long)]
+        presign: bool,
     },
     Records {
         #[arg(long)]
@@ -70,7 +72,8 @@ pub fn run() -> Result<(), String> {
             no_upload,
             no_record,
             allow_outside_project,
-        } => cmd_upload(&manifest, dry_run, no_upload, no_record, allow_outside_project),
+            presign,
+        } => cmd_upload(&manifest, dry_run, no_upload, no_record, allow_outside_project, presign),
         Commands::Records { jsonl, last } => cmd_records(&jsonl, last),
     }
 }
@@ -278,6 +281,7 @@ fn cmd_upload(
     no_upload: bool,
     no_record: bool,
     allow_outside_project: bool,
+    presign: bool,
 ) -> Result<(), String> {
     let (manifest, artifacts, warnings) = load_context(manifest_path, allow_outside_project)?;
     let run_start = Instant::now();
@@ -294,7 +298,16 @@ fn cmd_upload(
             println!("warning: {w}");
         }
         println!("planned run_id: {run_id}");
-        println!("planned remote dir: {}", oss_uri(&manifest.oss.bucket, &remote_dir, ""));
+        println!("planned remote dir: {remote_dir}");
+        let planned_archive_uri = oss_uri(&manifest.oss.bucket, &remote_dir, &format!("{run_id}.tar.gz"));
+        let planned_metadata_uri = oss_uri(&manifest.oss.bucket, &remote_dir, &format!("{run_id}.meta.json"));
+        let planned_sha_uri = oss_uri(&manifest.oss.bucket, &remote_dir, &format!("{run_id}.sha256"));
+        println!("planned archive uri: {planned_archive_uri}");
+        println!("planned metadata uri: {planned_metadata_uri}");
+        println!("planned sha256 uri: {planned_sha_uri}");
+        if presign {
+            println!("warning: --presign is only available after upload (objects must exist).");
+        }
         return Ok(());
     }
 
@@ -391,6 +404,15 @@ fn cmd_upload(
         println!("archive: {}", archive_path.display());
         println!("metadata: {}", metadata_path.display());
         println!("sha256: {}", sha_path.display());
+        println!("remote uri: {}", oss_uri(&manifest.oss.bucket, &remote_dir, archive_name));
+        println!(
+            "remote metadata uri: {}",
+            oss_uri(&manifest.oss.bucket, &remote_dir, &metadata_name)
+        );
+        println!("remote sha256 uri: {}", oss_uri(&manifest.oss.bucket, &remote_dir, &sha_name));
+        if presign {
+            println!("warning: --presign is only available after upload (objects must exist).");
+        }
         println!("duration: {:.2}s", run_start.elapsed().as_secs_f64());
         println!("avg MiB/s: {:.2}", 0.0);
         return Ok(());
@@ -435,6 +457,8 @@ fn cmd_upload(
     write_metadata_snapshot(&final_metadata, &metadata_path)?;
 
     let summary_uri = oss_uri(&manifest.oss.bucket, &remote_dir, archive_name);
+    let summary_metadata_uri = oss_uri(&manifest.oss.bucket, &remote_dir, &metadata_name);
+    let summary_sha_uri = oss_uri(&manifest.oss.bucket, &remote_dir, &sha_name);
     let duration = run_start.elapsed().as_secs_f64();
     let avg_mib_s = avg;
 
@@ -444,6 +468,34 @@ fn cmd_upload(
     println!("duration: {:.2}s", duration);
     println!("avg MiB/s: {:.2}", avg_mib_s.unwrap_or(0.0));
     println!("remote uri: {summary_uri}");
+    println!("remote metadata uri: {summary_metadata_uri}");
+    println!("remote sha256 uri: {summary_sha_uri}");
+
+    if presign {
+        let mut links = Vec::new();
+
+        for (label, name) in [
+            ("archive", archive_name),
+            ("metadata", metadata_name.as_str()),
+            ("sha256", sha_name.as_str()),
+        ] {
+            match presign_uri(
+                &manifest.oss.bucket,
+                &manifest.oss.endpoint,
+                &manifest.oss.region,
+                &remote_dir,
+                name,
+            ) {
+                Ok(url) => links.push(format!("{label}: {url}")),
+                Err(err) => links.push(format!("{label}: (warn) presign failed: {err}")),
+            }
+        }
+
+        println!("download links:");
+        for line in links {
+            println!("  {line}");
+        }
+    }
 
     if !no_record {
         let record = serde_json::json!({
@@ -452,7 +504,8 @@ fn cmd_upload(
             "run_name": final_metadata.run_name,
             "project": final_metadata.project,
             "archive_uri": summary_uri,
-            "metadata_uri": final_metadata.oss.metadata_uri,
+            "metadata_uri": summary_metadata_uri,
+            "sha256_uri": summary_sha_uri,
             "sha256": sha,
             "size_bytes": size_bytes,
             "avg_mib_s": avg_mib_s,

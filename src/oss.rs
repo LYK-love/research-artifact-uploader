@@ -83,6 +83,43 @@ pub fn upload_file(
     })
 }
 
+pub fn presign_uri(
+    bucket: &str,
+    endpoint: &str,
+    region: &str,
+    remote_dir: &str,
+    filename: &str,
+) -> AppResult<String> {
+    let uri = oss_uri(bucket, remote_dir, filename);
+    let cmd = vec![
+        "ossutil".to_string(),
+        "presign".to_string(),
+        uri.clone(),
+        "-e".to_string(),
+        endpoint.to_string(),
+        "--region".to_string(),
+        region.to_string(),
+    ];
+
+    let result = run_capture(&cmd, None).map_err(|e| format!("ossutil presign failed: {e}"))?;
+    if result.returncode != 0 {
+        let summary = (result.stderr.as_str()).trim();
+        let summary = if summary.is_empty() {
+            result.stdout.trim()
+        } else {
+            summary
+        };
+        let command = cmd.join(" ");
+        return Err(format!(
+            "ossutil presign failed (exit code {}).\ncommand: {command}\nerror: {}",
+            result.returncode, summary,
+        ));
+    }
+
+    parse_presign_url(&result.stdout)
+        .ok_or_else(|| "ossutil presign returned no download URL".to_string())
+}
+
 fn parse_avg_speed(text: &str) -> Option<f64> {
     let re = RE_MIB.get_or_init(|| {
         Regex::new(r"(?i)(?:avg|average)\s+([0-9]+(?:\.[0-9]+)?)\s*MiB/s").unwrap()
@@ -90,4 +127,24 @@ fn parse_avg_speed(text: &str) -> Option<f64> {
     re.captures(text)
         .and_then(|m| m.get(1))
         .and_then(|v| v.as_str().parse::<f64>().ok())
+}
+
+fn parse_presign_url(text: &str) -> Option<String> {
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let lower = line.to_ascii_lowercase();
+        if lower.starts_with("http://") || lower.starts_with("https://") {
+            return Some(line.to_string());
+        }
+    }
+
+    let first = text
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(ToString::to_string);
+    first.filter(|line| !line.is_empty())
 }

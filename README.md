@@ -115,6 +115,18 @@ Use placeholders in your own docs/manifests to avoid hardcoding shared deploymen
 - `endpoint: <your_endpoint>`
 - `remote_dir: <your_remote_path>`
 
+If you want immediate download URLs after upload, use:
+
+```bash
+rau upload --manifest examples/artifacts.yaml --presign
+```
+
+This prints:
+- deterministic `oss://...` object URIs (pre-upload planned values)
+- presigned URLs after successful upload (best effort; printed per-object)
+
+Without `--presign`, only deterministic `oss://` URIs are printed.
+
 ## Basic usage
 
 ```bash
@@ -133,6 +145,7 @@ rau records --markdown docs/upload_records.md --last 5
 - `--no-upload`: create archive + metadata only.
 - `--no-record`: skip local JSONL/Markdown append.
 - `--allow-outside-project`: allow artifact paths outside current working directory.
+- `--presign`: print best-effort presigned download URLs after successful upload.
 
 ## Manifest example
 
