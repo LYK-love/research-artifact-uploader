@@ -7,11 +7,11 @@
 
 ## What this project is
 
-`rau` packages and uploads deep-learning research artifacts to Alibaba Cloud OSS.
+`rau` uploads deep-learning experiment artifacts to Alibaba Cloud OSS.
 
-It is designed for post-training artifact collection: after a run ends, point a manifest at finished outputs, then run `rau upload` to collect, pack, and upload.
+Use it after training ends: point a manifest at existing outputs and run `rau upload`.
 
-It reads a manifest, validates required and optional artifact rules, collects matched files into a timestamped archive, computes checksums, and optionally uploads the archive + metadata.
+It reads the manifest, validates required/optional artifact rules, packages matched files into a timestamped archive, computes checksums, and uploads archive + metadata.
 
 It is conservative by design: no implicit network writes, no credential handling, and no training orchestration.
 
