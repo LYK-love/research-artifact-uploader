@@ -4,59 +4,91 @@
 >
 > 你可以使用 AI 将本文档和本项目的其他文档翻译成你偏好的语言，或为你解读其中的内容。
 >
-Therefore, repository usually does not provide translated parallel documents.
+> Therefore, repository usually does not provide translated parallel documents.
 
 ## What this project is
 
-This project is a conservative uploader for research artifacts. It collects configured files, validates required inputs, packages them into tar.gz archives, and uploads the archive with checksums and metadata.
+This project is a conservative uploader for research artifacts. It collects files described in a YAML manifest, validates required inputs, packages them into tar.gz archives, uploads them to Alibaba Cloud OSS with `ossutil`, and records metadata + checksums.
+
+It does not run training commands. It can upload existing files directly as-is if you only need to package/record files from a finished experiment.
 
 ## How this project works
 
-The tool reads a YAML manifest, checks artifact definitions, prepares an archive, computes SHA256, generates metadata, uploads using ossutil, and appends local upload records.
+- `rau check`: validate manifest and upload target checks.
+- `rau pack`: collect and create `.tar.gz` + `metadata` + `sha256` locally.
+- `rau upload`: full flow (pack, upload 3 files, append records).
+- `rau records`: print recent upload records from JSONL.
 
-## What is not covered
-
-The tool does not run training commands and does not contain any training harness.
+If you already have finished experiment outputs, you can upload them directly. No training command is required for this tool.
 
 ## Installation
 
+### Install from source (recommended for Linux/macOS)
+
 ```bash
+# clone repo
 git clone <your-repo-url>
 cd research-artifact-uploader
-python -m venv .venv
-source .venv/bin/activate
-python -m pip install -e .
+
+# build and install for current user
+cargo build --release
+cargo install --path . --root ~/.local
 ```
 
-The project is intended to run as an unprivileged user. If you do not have `sudo`:
-1. `ossutil` 可用标准方式安装；若无 `sudo`，请将二进制放到 `~/.local/bin` 并确保该目录在 `PATH`，其余步骤一致。
+Binary path: `~/.local/bin/rau`
 
-2. Verify `ossutil` is on `PATH`:
-   ```bash
-   which ossutil
-   ossutil --version
-   ```
+If your environment has no `sudo`, this still works because it installs to your home directory.
 
-3. Configure `ossutil` interactively once:
-   ```bash
-   ossutil config
-   ```
-   Fill in endpoint as `oss-accelerate.aliyuncs.com` and region as `cn-shanghai`.  
-   Do not share AccessKey or SecretKey in shell history or logs.
+### Download prebuilt binary
 
-4. Validate the OSS connection:
-   ```bash
-   ossutil ls oss://luyukuan-research -e oss-accelerate.aliyuncs.com --region cn-shanghai
-   ```
-   If list is not allowed by policy, the tool will continue with upload in `check`.
+If a release is published, download the matching archive from GitHub Releases and add it to PATH. The binary artifact is named by architecture and platform, for example:
 
-If you have shared Python environments, skip `python -m venv` and run against your existing environment.
+`rau-<version>-x86_64-unknown-linux-gnu.tar.gz`
+
+Example:
+
+```bash
+chmod +x rau-x86_64-unknown-linux-gnu
+mkdir -p ~/.local/bin
+mv rau-x86_64-unknown-linux-gnu ~/.local/bin/rau
+export PATH="$HOME/.local/bin:$PATH"
+```
 
 ## ossutil dependency
 
-`ossutil` must already be installed and configured on the machine. This project invokes `ossutil cp` and does not manage secrets.
+`ossutil` must be installed and configured on the host machine. This project only invokes `ossutil cp` with:
 
-## Default OSS configuration
+```bash
+ossutil cp <local> <oss-uri> -e oss-accelerate.aliyuncs.com --region cn-shanghai
+```
+
+Install `ossutil` (official docs):
+
+- Alibaba Cloud OSSutil documentation: [https://www.alibabacloud.com/help/en/oss/developer-reference/ossutil](https://www.alibabacloud.com/help/en/oss/developer-reference/ossutil)
+- GitHub releases (pick correct package): [https://github.com/aliyun/ossutil/releases](https://github.com/aliyun/ossutil/releases)
+
+Minimal install (Linux/macOS, no `sudo`), with downloaded package from the release page:
+
+```bash
+mkdir -p ~/.local/bin
+cd /tmp
+
+# example placeholder: ossutil-v1.7.20-linux-amd64.zip
+# download the correct asset for your OS/arch first.
+unzip -o ossutil-v1.7.20-linux-amd64.zip -d /tmp/ossutil_pkg
+for f in /tmp/ossutil_pkg/ossutil*; do
+  if [ -x "$f" ]; then
+    install -m 0755 "$f" ~/.local/bin/ossutil
+    break
+  fi
+done
+export PATH="$HOME/.local/bin:$PATH"
+rm -rf /tmp/ossutil_pkg
+
+ossutil config
+```
+
+Default OSS configuration:
 
 - bucket: luyukuan-research
 - region: cn-shanghai
@@ -106,7 +138,7 @@ records:
   markdown: docs/upload_records.md
 ```
 
-## CLI usage
+## Usage
 
 ### check
 
@@ -133,21 +165,31 @@ rau upload --manifest examples/artifacts.yaml
 rau records --jsonl docs/upload_records.jsonl --last 10
 ```
 
+## Direct upload in practice
+
+If you do not want to run a new training job, you can still upload existing files:
+
+1. Prepare a manifest whose `artifacts.path` points to existing files/directories.
+2. Run `rau check --manifest <your_manifest>`.
+3. Run `rau upload --manifest <your_manifest>`.
+
+No training command is required in this flow.
+
 ## Security requirements
 
-- Do not write AccessKey or secret key into manifest, metadata, records, logs, or docs.
-- Use the project directory default restriction; pass --allow-outside-project only when needed.
-- Prefer RAM users with least privileges.
+- Do not write AccessKey or secret keys into manifest, metadata, records, docs, or logs.
+- Keep outputs outside of default project boundaries unless explicitly allowed.
+- Use RAM users and least privilege policies.
 
 ## Troubleshooting
 
 - region must be set in sign version 4
-  - Ensure region is configured in the manifest as cn-shanghai.
+  - Ensure region is set as `cn-shanghai` in manifest.
 - AccessDenied
-  - Verify RAM permission for destination OSS path.
+  - Confirm IAM policy for destination path.
 - The bucket you access does not belong to you
-  - Confirm bucket owner and account context.
+  - Confirm account and bucket ownership.
 - ossutil not found
-  - Install ossutil and ensure it is in PATH.
+  - Ensure `ossutil` is installed and in PATH.
 
 This project was written collaboratively by humans and AI.

@@ -1,0 +1,27 @@
+[package]
+name = "research-artifact-uploader"
+version = "0.1.0"
+edition = "2021"
+description = "Conservative uploader for research artifacts to Alibaba Cloud OSS."
+readme = "README.md"
+license = "MIT"
+
+[dependencies]
+chrono = { version = "0.4", features = ["clock"] }
+clap = { version = "4", features = ["derive"] }
+glob = "0.3"
+regex = "1.10"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+sha2 = "0.10"
+tar = "0.4"
+flate2 = "1.0"
+walkdir = "2.5"
+
+[[bin]]
+name = "rau"
+path = "src/main.rs"
+
+[dev-dependencies]
+tempfile = "3.10"
