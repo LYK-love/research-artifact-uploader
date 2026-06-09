@@ -64,6 +64,83 @@ rau upload --manifest my_run_artifacts.yaml
 
 If no training command exists, existing finished outputs can also be uploaded directly.
 
+## Integration with job schedulers (tiny-scheduler)
+
+`rau` is designed to be called per job.
+
+Recommended pattern:
+
+1. Run training in a job-specific working directory.
+2. After training finishes (success or failure, based on your policy), generate/overwrite a job manifest.
+3. Execute:
+   - `rau check --manifest <job_artifacts.yaml>`
+   - `rau upload --manifest <job_artifacts.yaml>`
+
+Use `run.name` with `job_id` and set `remote_dir` to `artifacts/<project>/<job_id>` so each job has a unique prefix.
+
+### Recommended shell template
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+# provided by tiny-scheduler
+: "${JOB_ID:?}"
+: "${PROJECT:?}"
+: "${WORKDIR:?}"
+
+MANIFEST="${WORKDIR}/artifacts.yaml"
+
+cat > "${MANIFEST}" <<EOF
+run:
+  name: ${PROJECT}_${JOB_ID}
+  project: ${PROJECT}
+  tags:
+    - tiny-scheduler
+    - job-${JOB_ID}
+
+artifacts:
+  - name: ckpt_latest
+    path: ckpt/latest
+    type: directory
+    required: true
+
+  - name: metrics
+    path: metrics.jsonl
+    type: file
+    required: true
+
+  - name: videos
+    path: videos/*.mp4
+    type: glob
+    required: false
+
+archive:
+  output_dir: .rau/archives
+  format: tar.gz
+  compression_level: 3
+  include_manifest: true
+  include_git_info: true
+  include_metadata: true
+
+oss:
+  bucket: <your_bucket>
+  region: <your_region>
+  endpoint: <your_endpoint>
+  remote_dir: artifacts/${PROJECT}/${JOB_ID}
+
+records:
+  jsonl: jobs_records/upload_records.jsonl
+  markdown: jobs_records/upload_records.md
+EOF
+
+cd "${WORKDIR}"
+rau check --manifest "${MANIFEST}"
+rau upload --manifest "${MANIFEST}"
+```
+
+Place this script in your job `post_job`/`finally` hook in tiny-scheduler so it runs when one training job ends.
+
 ## Terminology
 
 - **Manifest**: YAML description of the run, artifact list, archive strategy, and OSS destination.
