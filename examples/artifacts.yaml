@@ -1,0 +1,39 @@
+run:
+  name: demo_run
+  project: research-artifact-uploader-demo
+  tags:
+    - demo
+
+artifacts:
+  - name: ckpt_latest
+    path: examples/fake_run/ckpt/latest
+    type: directory
+    required: true
+
+  - name: metrics
+    path: examples/fake_run/metrics.jsonl
+    type: file
+    required: true
+
+  - name: videos
+    path: examples/fake_run/videos/*.mp4
+    type: glob
+    required: false
+
+archive:
+  output_dir: .rau/archives
+  format: tar.gz
+  compression_level: 3
+  include_manifest: true
+  include_git_info: true
+  include_metadata: true
+
+oss:
+  bucket: luyukuan-research
+  region: cn-shanghai
+  endpoint: oss-accelerate.aliyuncs.com
+  remote_dir: artifacts/demo/demo_run
+
+records:
+  jsonl: docs/upload_records.jsonl
+  markdown: docs/upload_records.md
