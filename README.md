@@ -7,58 +7,78 @@
 
 ## What this project is
 
-`rau` is a conservative CLI that uploads research outputs described in a manifest to Alibaba Cloud OSS.
+`rau` packages and uploads experiment artifacts to Alibaba Cloud OSS.
 
-It validates artifact paths, builds a timestamped `tar.gz`, computes `sha256`, writes metadata, uploads via `ossutil cp`, and appends local upload records.
+It reads a manifest, validates required and optional artifact rules, collects matched files into a timestamped archive, computes checksums, and optionally uploads the archive + metadata.
 
-It does not run or manage training. Existing files can be uploaded directly.
+It is conservative by design: no implicit network writes, no credential handling, and no training orchestration.
+
+## Minimal flow
 
 ```text
+experiment outputs
+    |
+    v
 manifest.yml
-   |
-   v
-+----------+
-|  check  |
-+----------+
-   |
-   v
-+-------------+
-|  collect    |
-+-------------+
-   |
-   v
+    |
+    v
++---------+
+| validate |
++---------+
+    |
+    v
++---------+
+| collect  |
++---------+
+    |
+    v
++------------+
+| pack+meta  |
++------------+
+    |
+    v
++------------+
+| upload 3x  |
++------------+
+    |
+    v
 +----------------+
-| pack + hash    |
+| local records   |
 +----------------+
-   |
-   v
-+----------------------+
-| upload metadata/uri  |
-+----------------------+
-   |
-   v
-+---------------------+
-| local JSONL/Markdown |
-+---------------------+
 ```
+
+## Why for deep-learning workflows
+
+`rau` is useful both for direct file upload and for post-training automation.
+
+- In a normal research loop, define `examples/artifacts.yaml` (or a copy) pointing to your output paths.
+- After training ends, call `rau upload` with that manifest.
+
+```bash
+# after long-running training
+python train.py --config cfg.yaml
+rau upload --manifest my_run_artifacts.yaml
+```
+
+If no training command exists, existing finished outputs can also be uploaded directly.
 
 ## Terminology
 
-- **Manifest**: YAML file with run name, artifacts, archive options, and OSS destination.
-- **Artifact**: A named `file`, `directory`, or `glob` entry to include.
-- **run_id**: `<run_name>_<YYYYMMDD_HHMMSS>` for each upload/pack invocation.
+- **Manifest**: YAML description of the run, artifact list, archive strategy, and OSS destination.
+- **Artifact**: One `file`, `directory`, or `glob` entry to include.
+- **run_id**: `<run_name>_<YYYYMMDD_HHMMSS>` generated per run.
 
 ## Prerequisites
 
-- `ossutil` installed and configured.
+- `ossutil` binary installed and configured.
 - Rust toolchain (`cargo`, `rustc`).
-- `git` installed for git-info optional metadata; not required.
+- `git` (optional; metadata will mark git info unavailable when absent).
 
-No `sudo` is required if installed under `$HOME`.
+No `sudo` is required if installing under `$HOME`.
 
 ## Install dependencies (required order)
 
-### 1) Install `ossutil`
+### 1) Install `ossutil` first
 
 Official docs:
 - https://www.alibabacloud.com/help/en/oss/developer-reference/ossutil
@@ -66,7 +86,6 @@ Official docs:
 
 ```bash
 mkdir -p ~/.local/bin
-# use the correct binary for your platform from official release
 curl -L -o ~/.local/bin/ossutil <ossutil-download-url>
 chmod +x ~/.local/bin/ossutil
 export PATH="$HOME/.local/bin:$PATH"
@@ -82,17 +101,19 @@ cd research-artifact-uploader
 cargo build --release
 # optional: install to PATH
 cargo install --path . --root ~/.local
-# verify
 ~/.local/bin/rau --help
 ```
 
-## Default OSS settings
+## OSS fields in manifest
 
-- bucket: `luyukuan-research`
-- region: `cn-shanghai`
-- endpoint: `oss-accelerate.aliyuncs.com`
+Use placeholders in your own docs/manifests to avoid hardcoding shared deployment details:
 
-## Install and use
+- `bucket: <your_bucket>`
+- `region: <your_region>`
+- `endpoint: <your_endpoint>`
+- `remote_dir: <your_remote_path>`
+
+## Basic usage
 
 ```bash
 rau check --manifest examples/artifacts.yaml
@@ -103,15 +124,15 @@ rau records --jsonl docs/upload_records.jsonl --last 5
 rau records --markdown docs/upload_records.md --last 5
 ```
 
-### Key flags
+## Key flags
 
-- `--manifest <file>`: manifest path (required for `check/pack/upload`).
-- `--dry-run`: show planned actions; no files written.
-- `--no-upload`: pack + metadata only.
-- `--no-record`: skip local logs.
-- `--allow-outside-project`: allow paths outside current project directory.
+- `--manifest <file>`: manifest file path (required for `check`, `pack`, `upload`).
+- `--dry-run`: plan only, no files created/uploaded/recorded.
+- `--no-upload`: create archive + metadata only.
+- `--no-record`: skip local JSONL/Markdown append.
+- `--allow-outside-project`: allow artifact paths outside current working directory.
 
-### Manifest example
+## Manifest example
 
 ```yaml
 run:
@@ -145,9 +166,9 @@ archive:
   include_metadata: true
 
 oss:
-  bucket: luyukuan-research
-  region: cn-shanghai
-  endpoint: oss-accelerate.aliyuncs.com
+  bucket: <your_bucket>
+  region: <your_region>
+  endpoint: <your_endpoint>
   remote_dir: artifacts/demo/demo_run
 
 records:
@@ -155,35 +176,35 @@ records:
   markdown: docs/upload_records.md
 ```
 
-Defaults are used when `archive`, `oss`, or `records` sections are partially omitted.
+Defaults apply if `archive`, `oss`, or `records` sections are omitted.
 
-## Non-training upload flow (direct file upload)
+## No-training direct upload flow
 
 ```bash
-cp examples/artifacts.yaml your_artifacts.yaml
-# edit only run.name / project / artifact paths
-rau check --manifest your_artifacts.yaml
-rau upload --manifest your_artifacts.yaml --no-upload
-rau upload --manifest your_artifacts.yaml
+cp examples/artifacts.yaml my_artifacts.yaml
+# adjust run.name / project / artifact paths
+rau check --manifest my_artifacts.yaml
+rau upload --manifest my_artifacts.yaml --no-upload
+rau upload --manifest my_artifacts.yaml
 ```
 
 ## Security notes
 
-- Do not store AccessKey/Secret in code, manifest, metadata, logs, or docs.
-- Project-root paths outside current directory are blocked by default.
-- Required artifacts missing cause failure.
-- Required glob that matches nothing causes failure.
-- `.git/`, `.rau/`, and `__pycache__/` are excluded unless explicitly declared.
+- Never place credentials in code, manifests, metadata, logs, or readme.
+- Default path check blocks artifact locations outside the current project.
+- Missing required artifacts fail the run.
+- Required `glob` with zero matches fails the run.
+- `.git/`, `.rau/`, and `__pycache__/` are excluded unless explicitly included.
 
 ## Troubleshooting
 
 - `region must be set in sign version 4`
-  - Ensure manifest has `region: cn-shanghai` (default is set).
+  - Ensure manifest includes `region` and `ossutil` is using the correct profile.
 - `AccessDenied`
-  - Check RAM policy for `PutObject` / related path prefix.
+  - Check OSS policy for destination prefix and `PutObject` permission.
 - `The bucket you access does not belong to you`
-  - Confirm the configured account owns the target bucket.
+  - Confirm you are using the owning account/project credentials.
 - `ossutil not found`
-  - Confirm binary installed and in `PATH`.
+  - Ensure `ossutil` is on `PATH`.
 
 This project was written collaboratively by humans and AI.
