@@ -3,98 +3,115 @@
 > You can use AI to translate or explain this document and the rest of the project's documentation in your preferred language.
 >
 > 你可以使用 AI 将本文档和本项目的其他文档翻译成你偏好的语言，或为你解读其中的内容。
->
-> Therefore, repository usually does not provide translated parallel documents.
+> 因此仓库通常不再提供其他语言版本的平行文档。
 
 ## What this project is
 
-This project is a conservative uploader for research artifacts. It collects files described in a YAML manifest, validates required inputs, packages them into tar.gz archives, uploads them to Alibaba Cloud OSS with `ossutil`, and records metadata + checksums.
+`rau` is a conservative CLI that uploads research outputs described in a manifest to Alibaba Cloud OSS.
 
-It does not run training commands. It can upload existing files directly as-is if you only need to package/record files from a finished experiment.
+It validates artifact paths, builds a timestamped `tar.gz`, computes `sha256`, writes metadata, uploads via `ossutil cp`, and appends local upload records.
 
-## How this project works
+It does not run or manage training. Existing files can be uploaded directly.
 
-- `rau check`: validate manifest and upload target checks.
-- `rau pack`: collect and create `.tar.gz` + `metadata` + `sha256` locally.
-- `rau upload`: full flow (pack, upload 3 files, append records).
-- `rau records`: print recent upload records from JSONL.
-
-If you already have finished experiment outputs, you can upload them directly. No training command is required for this tool.
-
-## Installation
-
-### Install from source (recommended for Linux/macOS)
-
-```bash
-# clone repo
-git clone <your-repo-url>
-cd research-artifact-uploader
-
-# build and install for current user
-cargo build --release
-cargo install --path . --root ~/.local
+```text
+manifest.yml
+   |
+   v
++----------+
+|  check  |
++----------+
+   |
+   v
++-------------+
+|  collect    |
++-------------+
+   |
+   v
++----------------+
+| pack + hash    |
++----------------+
+   |
+   v
++----------------------+
+| upload metadata/uri  |
++----------------------+
+   |
+   v
++---------------------+
+| local JSONL/Markdown |
++---------------------+
 ```
 
-Binary path: `~/.local/bin/rau`
+## Terminology
 
-If your environment has no `sudo`, this still works because it installs to your home directory.
+- **Manifest**: YAML file with run name, artifacts, archive options, and OSS destination.
+- **Artifact**: A named `file`, `directory`, or `glob` entry to include.
+- **run_id**: `<run_name>_<YYYYMMDD_HHMMSS>` for each upload/pack invocation.
 
-### Download prebuilt binary
+## Prerequisites
 
-If a release is published, download the matching archive from GitHub Releases and add it to PATH. The binary artifact is named by architecture and platform, for example:
+- `ossutil` installed and configured.
+- Rust toolchain (`cargo`, `rustc`).
+- `git` installed for git-info optional metadata; not required.
 
-`rau-<version>-x86_64-unknown-linux-gnu.tar.gz`
+No `sudo` is required if installed under `$HOME`.
 
-Example:
+## Install dependencies (required order)
 
-```bash
-chmod +x rau-x86_64-unknown-linux-gnu
-mkdir -p ~/.local/bin
-mv rau-x86_64-unknown-linux-gnu ~/.local/bin/rau
-export PATH="$HOME/.local/bin:$PATH"
-```
+### 1) Install `ossutil`
 
-## ossutil dependency
-
-`ossutil` must be installed and configured on the host machine. This project only invokes `ossutil cp` with:
-
-```bash
-ossutil cp <local> <oss-uri> -e oss-accelerate.aliyuncs.com --region cn-shanghai
-```
-
-Install `ossutil` (official docs):
-
-- Alibaba Cloud OSSutil documentation: [https://www.alibabacloud.com/help/en/oss/developer-reference/ossutil](https://www.alibabacloud.com/help/en/oss/developer-reference/ossutil)
-- GitHub releases (pick correct package): [https://github.com/aliyun/ossutil/releases](https://github.com/aliyun/ossutil/releases)
-
-Minimal install (Linux/macOS, no `sudo`), with downloaded package from the release page:
+Official docs:
+- https://www.alibabacloud.com/help/en/oss/developer-reference/ossutil
+- https://github.com/aliyun/ossutil/releases
 
 ```bash
 mkdir -p ~/.local/bin
-cd /tmp
-
-# example placeholder: ossutil-v1.7.20-linux-amd64.zip
-# download the correct asset for your OS/arch first.
-unzip -o ossutil-v1.7.20-linux-amd64.zip -d /tmp/ossutil_pkg
-for f in /tmp/ossutil_pkg/ossutil*; do
-  if [ -x "$f" ]; then
-    install -m 0755 "$f" ~/.local/bin/ossutil
-    break
-  fi
-done
+# use the correct binary for your platform from official release
+curl -L -o ~/.local/bin/ossutil <ossutil-download-url>
+chmod +x ~/.local/bin/ossutil
 export PATH="$HOME/.local/bin:$PATH"
-rm -rf /tmp/ossutil_pkg
-
 ossutil config
 ```
 
-Default OSS configuration:
+### 2) Install `rau`
 
-- bucket: luyukuan-research
-- region: cn-shanghai
-- endpoint: oss-accelerate.aliyuncs.com
+```bash
+git clone <your-repo-url>
+cd research-artifact-uploader
 
-## Manifest example
+cargo build --release
+# optional: install to PATH
+cargo install --path . --root ~/.local
+# verify
+~/.local/bin/rau --help
+```
+
+## Default OSS settings
+
+- bucket: `luyukuan-research`
+- region: `cn-shanghai`
+- endpoint: `oss-accelerate.aliyuncs.com`
+
+## Install and use
+
+```bash
+rau check --manifest examples/artifacts.yaml
+rau pack --manifest examples/artifacts.yaml
+rau upload --manifest examples/artifacts.yaml --no-upload
+rau upload --manifest examples/artifacts.yaml
+rau records --jsonl docs/upload_records.jsonl --last 5
+rau records --markdown docs/upload_records.md --last 5
+```
+
+### Key flags
+
+- `--manifest <file>`: manifest path (required for `check/pack/upload`).
+- `--dry-run`: show planned actions; no files written.
+- `--no-upload`: pack + metadata only.
+- `--no-record`: skip local logs.
+- `--allow-outside-project`: allow paths outside current project directory.
+
+### Manifest example
 
 ```yaml
 run:
@@ -138,58 +155,35 @@ records:
   markdown: docs/upload_records.md
 ```
 
-## Usage
+Defaults are used when `archive`, `oss`, or `records` sections are partially omitted.
 
-### check
-
-```bash
-rau check --manifest examples/artifacts.yaml
-```
-
-### pack
+## Non-training upload flow (direct file upload)
 
 ```bash
-rau pack --manifest examples/artifacts.yaml
+cp examples/artifacts.yaml your_artifacts.yaml
+# edit only run.name / project / artifact paths
+rau check --manifest your_artifacts.yaml
+rau upload --manifest your_artifacts.yaml --no-upload
+rau upload --manifest your_artifacts.yaml
 ```
 
-### upload
+## Security notes
 
-```bash
-rau upload --manifest examples/artifacts.yaml --no-upload
-rau upload --manifest examples/artifacts.yaml
-```
-
-### records
-
-```bash
-rau records --jsonl docs/upload_records.jsonl --last 10
-```
-
-## Direct upload in practice
-
-If you do not want to run a new training job, you can still upload existing files:
-
-1. Prepare a manifest whose `artifacts.path` points to existing files/directories.
-2. Run `rau check --manifest <your_manifest>`.
-3. Run `rau upload --manifest <your_manifest>`.
-
-No training command is required in this flow.
-
-## Security requirements
-
-- Do not write AccessKey or secret keys into manifest, metadata, records, docs, or logs.
-- Keep outputs outside of default project boundaries unless explicitly allowed.
-- Use RAM users and least privilege policies.
+- Do not store AccessKey/Secret in code, manifest, metadata, logs, or docs.
+- Project-root paths outside current directory are blocked by default.
+- Required artifacts missing cause failure.
+- Required glob that matches nothing causes failure.
+- `.git/`, `.rau/`, and `__pycache__/` are excluded unless explicitly declared.
 
 ## Troubleshooting
 
-- region must be set in sign version 4
-  - Ensure region is set as `cn-shanghai` in manifest.
-- AccessDenied
-  - Confirm IAM policy for destination path.
-- The bucket you access does not belong to you
-  - Confirm account and bucket ownership.
-- ossutil not found
-  - Ensure `ossutil` is installed and in PATH.
+- `region must be set in sign version 4`
+  - Ensure manifest has `region: cn-shanghai` (default is set).
+- `AccessDenied`
+  - Check RAM policy for `PutObject` / related path prefix.
+- `The bucket you access does not belong to you`
+  - Confirm the configured account owns the target bucket.
+- `ossutil not found`
+  - Confirm binary installed and in `PATH`.
 
 This project was written collaboratively by humans and AI.
